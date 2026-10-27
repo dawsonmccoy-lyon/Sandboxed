@@ -60,7 +60,9 @@ function fillCircle(world: World, cx: number, cy: number, radius: number, materi
     for (let x = Math.max(0, cx - r); x <= Math.min(COLS - 1, cx + r); x += 1) {
       const dx = x - cx;
       const dy = y - cy;
-      if (dx * dx + dy * dy <= r * r && Math.random() > 0.12) {
+      const insideBrush = dx * dx + dy * dy <= r * r;
+      const depositPixel = material === 0 || Math.random() > 0.12;
+      if (insideBrush && depositPixel) {
         const i = indexAt(x, y);
         world.cells[i] = material;
         world.heat[i] = material === 6 ? 1 : 0;
@@ -220,6 +222,7 @@ export function SandboxedGame() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const worldRef = useRef<World | null>(null);
   const selectedRef = useRef<Material>(2);
+  const activeMaterialRef = useRef<Material>(2);
   const pausedRef = useRef(false);
   const drawingRef = useRef(false);
   const lastPointRef = useRef<{ x: number; y: number } | null>(null);
@@ -316,13 +319,14 @@ export function SandboxedGame() {
     for (let step = 0; step <= steps; step += 1) {
       const drawX = current ? Math.round(current.x + ((x - current.x) * step) / steps) : x;
       const drawY = current ? Math.round(current.y + ((y - current.y) * step) / steps) : y;
-      fillCircle(world, drawX, drawY, 4, selectedRef.current);
+      fillCircle(world, drawX, drawY, 4, activeMaterialRef.current);
     }
     lastPointRef.current = { x, y };
   }, []);
 
   const startDrawing = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (event.button !== 0 && event.pointerType !== "touch") return;
+    if (event.button !== 0 && event.button !== 2 && event.pointerType !== "touch") return;
+    activeMaterialRef.current = event.button === 2 ? 0 : selectedRef.current;
     drawingRef.current = true;
     lastPointRef.current = null;
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -728,7 +732,7 @@ export function SandboxedGame() {
               ref={canvasRef}
               className="sb-canvas"
               role="img"
-              aria-label="Interactive falling sand simulation. Draw with the selected material."
+              aria-label="Interactive falling sand simulation. Draw with the selected material. Right-click and drag to erase."
               tabIndex={0}
               onPointerDown={startDrawing}
               onPointerMove={continueDrawing}
