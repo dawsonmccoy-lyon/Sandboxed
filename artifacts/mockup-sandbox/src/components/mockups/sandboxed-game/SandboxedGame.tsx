@@ -113,7 +113,11 @@ function tick(world: World, frame: number): void {
     for (let x = start; x !== end; x += stride) {
       const i = indexAt(x, y);
       const kind = world.cells[i];
-      if (kind === 0 || world.moved[i]) continue;
+      if (kind === 0) {
+        world.heat[i] = Math.max(0, world.heat[i] - 0.007);
+        continue;
+      }
+      if (world.moved[i]) continue;
 
       if (kind === 6) {
         world.heat[i] = 1;
