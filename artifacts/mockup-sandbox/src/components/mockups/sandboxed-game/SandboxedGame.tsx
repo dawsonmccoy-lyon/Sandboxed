@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 type MaterialName = "Stone" | "Sand" | "Water" | "Steam" | "Wood" | "Fire";
 type Material = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
+type CursorPreview = { x: number; y: number; erasing: boolean };
 
 type World = {
   cells: Uint8Array;
@@ -49,6 +50,15 @@ function indexAt(x: number, y: number): number {
   return y * COLS + x;
 }
 
+function cellAtPointer(canvas: HTMLCanvasElement, clientX: number, clientY: number): { x: number; y: number } | null {
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return null;
+  return {
+    x: Math.max(0, Math.min(COLS - 1, Math.floor(((clientX - rect.left) / rect.width) * COLS))),
+    y: Math.max(0, Math.min(ROWS - 1, Math.floor(((clientY - rect.top) / rect.height) * ROWS))),
+  };
+}
+
 function swap(world: World, from: number, to: number): void {
   world.cells[to] = world.cells[from];
   world.heat[to] = world.heat[from];
@@ -65,12 +75,18 @@ function fillCircle(world: World, cx: number, cy: number, radius: number, materi
     for (let x = Math.max(0, cx - r); x <= Math.min(COLS - 1, cx + r); x += 1) {
       const dx = x - cx;
       const dy = y - cy;
-      const insideBrush = dx * dx + dy * dy <= r * r;
-      const depositPixel = material === 0 || Math.random() > 0.12;
-      if (insideBrush && depositPixel) {
-        const i = indexAt(x, y);
+      if (dx * dx + dy * dy > r * r) continue;
+      const i = indexAt(x, y);
+      if (material === 0) {
+        if (world.cells[i] === 0) continue;
+        world.cells[i] = 0;
+        world.heat[i] = AMBIENT_TEMPERATURE_K;
+        world.nextHeat[i] = AMBIENT_TEMPERATURE_K;
+        world.burn[i] = 0;
+      } else if (world.cells[i] === 0) {
         world.cells[i] = material;
         world.heat[i] = material === 6 ? FIRE_TEMPERATURE_K : AMBIENT_TEMPERATURE_K;
+        world.nextHeat[i] = world.heat[i];
         world.burn[i] = material === 6 ? 90 : 0;
       }
     }
@@ -262,6 +278,7 @@ export function SandboxedGame() {
   const worldRef = useRef<World | null>(null);
   const selectedRef = useRef<Material>(2);
   const activeMaterialRef = useRef<Material>(2);
+  const cursorRef = useRef<CursorPreview | null>(null);
   const pausedRef = useRef(false);
   const drawingRef = useRef(false);
   const lastPointRef = useRef<{ x: number; y: number } | null>(null);
@@ -319,6 +336,26 @@ export function SandboxedGame() {
         pixels[offset + 3] = 255;
       }
       context.putImageData(image, 0, 0);
+
+      const cursor = cursorRef.current;
+      if (cursor) {
+        const selectedColor = COLORS[selectedRef.current];
+        context.save();
+        context.fillStyle = cursor.erasing
+          ? "rgba(255, 255, 255, 0.78)"
+          : `rgba(${selectedColor[0]}, ${selectedColor[1]}, ${selectedColor[2]}, 0.64)`;
+        for (let y = Math.max(0, cursor.y - 4); y <= Math.min(ROWS - 1, cursor.y + 4); y += 1) {
+          for (let x = Math.max(0, cursor.x - 4); x <= Math.min(COLS - 1, cursor.x + 4); x += 1) {
+            const dx = x - cursor.x;
+            const dy = y - cursor.y;
+            if (dx * dx + dy * dy > 16) continue;
+            const kind = world.cells[indexAt(x, y)];
+            const willChange = cursor.erasing ? kind !== 0 : kind === 0;
+            if (willChange) context.fillRect(x, y, 1, 1);
+          }
+        }
+        context.restore();
+      }
       animation = window.requestAnimationFrame(render);
     };
     animation = window.requestAnimationFrame(render);
@@ -346,13 +383,22 @@ export function SandboxedGame() {
     };
   }, [clearWorld]);
 
+  const previewAt = useCallback((clientX: number, clientY: number, erasing: boolean) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const point = cellAtPointer(canvas, clientX, clientY);
+    if (point) cursorRef.current = { ...point, erasing };
+  }, []);
+
   const paintAt = useCallback((clientX: number, clientY: number) => {
     const canvas = canvasRef.current;
     const world = worldRef.current;
     if (!canvas || !world) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = Math.max(0, Math.min(COLS - 1, Math.floor(((clientX - rect.left) / rect.width) * COLS)));
-    const y = Math.max(0, Math.min(ROWS - 1, Math.floor(((clientY - rect.top) / rect.height) * ROWS)));
+    const point = cellAtPointer(canvas, clientX, clientY);
+    if (!point) return;
+    const { x, y } = point;
+    const erasing = activeMaterialRef.current === 0;
+    cursorRef.current = { x, y, erasing };
     const current = lastPointRef.current;
     const steps = current ? Math.max(Math.abs(x - current.x), Math.abs(y - current.y), 1) : 1;
     for (let step = 0; step <= steps; step += 1) {
@@ -373,10 +419,17 @@ export function SandboxedGame() {
   };
   const continueDrawing = (event: React.PointerEvent<HTMLCanvasElement>) => {
     if (drawingRef.current) paintAt(event.clientX, event.clientY);
+    else if (event.pointerType !== "touch") previewAt(event.clientX, event.clientY, false);
   };
-  const stopDrawing = () => {
+  const stopDrawing = (event: React.PointerEvent<HTMLCanvasElement>) => {
     drawingRef.current = false;
     lastPointRef.current = null;
+    activeMaterialRef.current = selectedRef.current;
+    if (event.pointerType === "touch") cursorRef.current = null;
+    else previewAt(event.clientX, event.clientY, false);
+  };
+  const leaveCanvas = () => {
+    if (!drawingRef.current) cursorRef.current = null;
   };
 
   return (
@@ -771,13 +824,19 @@ export function SandboxedGame() {
               ref={canvasRef}
               className="sb-canvas"
               role="img"
-              aria-label="Interactive falling sand simulation. Draw with the selected material. Right-click and drag to erase."
+              aria-label="Interactive falling sand simulation. Draw into empty pixels with the selected material; the highlighted pixels show what will change. Right-click and drag to erase."
               tabIndex={0}
               onPointerDown={startDrawing}
+              onPointerEnter={(event) => {
+                if (event.pointerType !== "touch" && !drawingRef.current) {
+                  previewAt(event.clientX, event.clientY, false);
+                }
+              }}
               onPointerMove={continueDrawing}
               onPointerUp={stopDrawing}
               onPointerCancel={stopDrawing}
               onLostPointerCapture={stopDrawing}
+              onPointerLeave={leaveCanvas}
               onContextMenu={(event) => event.preventDefault()}
             />
           </div>
