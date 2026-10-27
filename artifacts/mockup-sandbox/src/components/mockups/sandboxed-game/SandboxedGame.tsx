@@ -21,22 +21,22 @@ const MATERIALS: {
   descriptor: string;
   tone: string;
 }[] = [
-  { name: "Stone", id: 1, key: "1", descriptor: "solid", tone: "#85898b" },
-  { name: "Sand", id: 2, key: "2", descriptor: "powder", tone: "#c4c0b4" },
-  { name: "Water", id: 3, key: "3", descriptor: "liquid", tone: "#aab4b9" },
-  { name: "Steam", id: 4, key: "4", descriptor: "gas", tone: "#e0e1df" },
-  { name: "Wood", id: 5, key: "5", descriptor: "reactive", tone: "#73736f" },
-  { name: "Fire", id: 6, key: "6", descriptor: "heat", tone: "#f0eee8" },
+  { name: "Stone", id: 1, key: "1", descriptor: "solid", tone: "#9F9F9F" },
+  { name: "Sand", id: 2, key: "2", descriptor: "powder", tone: "#FECF8F" },
+  { name: "Water", id: 3, key: "3", descriptor: "liquid", tone: "#2030D0" },
+  { name: "Steam", id: 4, key: "4", descriptor: "gas", tone: "#A0A0FF" },
+  { name: "Wood", id: 5, key: "5", descriptor: "reactive", tone: "#BF9F3F" },
+  { name: "Fire", id: 6, key: "6", descriptor: "heat", tone: "#FE0F00" },
 ];
 
 const COLORS: Record<number, [number, number, number]> = {
   0: [5, 6, 7],
-  1: [119, 124, 126],
-  2: [183, 178, 165],
-  3: [128, 141, 148],
-  4: [205, 207, 205],
-  5: [91, 91, 87],
-  6: [238, 237, 230],
+  1: [159, 159, 159],
+  2: [254, 207, 143],
+  3: [32, 48, 208],
+  4: [160, 160, 255],
+  5: [191, 159, 63],
+  6: [254, 15, 0],
   7: [104, 103, 98],
 };
 
@@ -271,12 +271,10 @@ export function SandboxedGame() {
       for (let i = 0; i < TOTAL; i += 1) {
         const kind = world.cells[i];
         const color = COLORS[kind];
-        const heat = world.heat[i];
-        const shimmer = kind === 6 ? (frame + i * 13) % 3 : 0;
         const offset = i * 4;
-        pixels[offset] = Math.min(255, color[0] + shimmer * 5 + heat * 10);
-        pixels[offset + 1] = Math.min(255, color[1] + shimmer * 5 + heat * 10);
-        pixels[offset + 2] = Math.min(255, color[2] + shimmer * 5 + heat * 10);
+        pixels[offset] = color[0];
+        pixels[offset + 1] = color[1];
+        pixels[offset + 2] = color[2];
         pixels[offset + 3] = 255;
       }
       context.putImageData(image, 0, 0);
