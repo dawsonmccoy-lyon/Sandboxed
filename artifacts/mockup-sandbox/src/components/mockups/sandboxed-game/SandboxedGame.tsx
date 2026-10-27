@@ -199,7 +199,7 @@ function tick(world: World, frame: number): void {
   }
 }
 
-function Icon({ kind }: { kind: "play" | "pause" | "clear" | "dot" }) {
+function Icon({ kind }: { kind: "play" | "pause" | "clear" }) {
   if (kind === "play") {
     return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.5 12 8l-7 4.5z" fill="currentColor" /></svg>;
   }
@@ -209,25 +209,20 @@ function Icon({ kind }: { kind: "play" | "pause" | "clear" | "dot" }) {
   if (kind === "clear") {
     return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M6 4.5V3h4v1.5m-5.5 0 .6 8h5.8l.6-8M6.5 7v3.5m3-3.5v3.5" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" /></svg>;
   }
-  return <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.2" fill="currentColor" /></svg>;
+  return null;
 }
 
 export function SandboxedGame() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const worldRef = useRef<World | null>(null);
   const selectedRef = useRef<Material>(2);
-  const brushRef = useRef(4);
   const pausedRef = useRef(false);
   const drawingRef = useRef(false);
   const lastPointRef = useRef<{ x: number; y: number } | null>(null);
   const [selected, setSelected] = useState<Material>(2);
-  const [brush, setBrush] = useState(4);
   const [paused, setPaused] = useState(false);
-  const [counts, setCounts] = useState({ particles: 0, temperature: "ambient" });
-  const [notice, setNotice] = useState("");
 
   selectedRef.current = selected;
-  brushRef.current = brush;
   pausedRef.current = paused;
 
   const clearWorld = useCallback(() => {
@@ -236,12 +231,10 @@ export function SandboxedGame() {
     world.cells.fill(0);
     world.heat.fill(0);
     world.burn.fill(0);
-    setNotice("The surface is clear.");
   }, []);
 
   const togglePaused = useCallback(() => {
     setPaused((value) => !value);
-    setNotice(pausedRef.current ? "Simulation resumed." : "Simulation paused.");
   }, []);
 
   useEffect(() => {
@@ -263,20 +256,15 @@ export function SandboxedGame() {
     const image = context.createImageData(COLS, ROWS);
     let frame = 0;
     let animation = 0;
-    let lastStats = 0;
 
-    const render = (now: number) => {
+    const render = () => {
       if (!pausedRef.current && frame % 2 === 0) tick(world, frame);
       frame += 1;
       const pixels = image.data;
-      let particles = 0;
-      let hottest = 0;
       for (let i = 0; i < TOTAL; i += 1) {
         const kind = world.cells[i];
         const color = COLORS[kind];
         const heat = world.heat[i];
-        if (kind !== 0) particles += 1;
-        if (heat > hottest) hottest = heat;
         const shimmer = kind === 6 ? (frame + i * 13) % 3 : 0;
         const offset = i * 4;
         pixels[offset] = Math.min(255, color[0] + shimmer * 5 + heat * 10);
@@ -285,19 +273,12 @@ export function SandboxedGame() {
         pixels[offset + 3] = 255;
       }
       context.putImageData(image, 0, 0);
-      if (now - lastStats > 550) {
-        setCounts({
-          particles,
-          temperature: hottest > 0.65 ? "heated" : hottest > 0.12 ? "warm" : "ambient",
-        });
-        lastStats = now;
-      }
       animation = window.requestAnimationFrame(render);
     };
     animation = window.requestAnimationFrame(render);
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.repeat || event.target instanceof HTMLInputElement) return;
+      if (event.repeat) return;
       const material = MATERIALS.find((item) => item.key === event.key);
       if (material) {
         setSelected(material.id);
@@ -308,8 +289,6 @@ export function SandboxedGame() {
         setPaused((value) => !value);
       } else if (event.key.toLowerCase() === "c") {
         clearWorld();
-      } else if (event.key === "[" || event.key === "]") {
-        setBrush((value) => Math.max(1, Math.min(12, value + (event.key === "]" ? 1 : -1))));
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -333,7 +312,7 @@ export function SandboxedGame() {
     for (let step = 0; step <= steps; step += 1) {
       const drawX = current ? Math.round(current.x + ((x - current.x) * step) / steps) : x;
       const drawY = current ? Math.round(current.y + ((y - current.y) * step) / steps) : y;
-      fillCircle(world, drawX, drawY, brushRef.current, selectedRef.current);
+      fillCircle(world, drawX, drawY, 4, selectedRef.current);
     }
     lastPointRef.current = { x, y };
   }, []);
@@ -605,40 +584,120 @@ export function SandboxedGame() {
         @media (prefers-reduced-motion: reduce) {
           .sb-shell * { transition-duration: 0.01ms !important; }
         }
+        .sb-shell {
+          width: 100%;
+          height: 100dvh;
+          min-height: 0;
+          padding: 0;
+          margin: 0;
+          overflow: hidden;
+        }
+        .sb-workspace {
+          width: 100%;
+          max-width: none;
+          height: 100%;
+          margin: 0;
+          display: grid;
+          grid-template-columns: 148px minmax(0, 1fr);
+          grid-template-rows: minmax(0, 1fr) 52px;
+          border: 0;
+          background: #050606;
+        }
+        .sb-tool-rail {
+          grid-column: 1;
+          grid-row: 1;
+          min-height: 0;
+          padding: 8px;
+          overflow-y: auto;
+          border-right: 1px solid var(--sb-line);
+        }
+        .sb-material-list { display: grid; gap: 3px; }
+        .sb-material {
+          width: 100%;
+          min-height: 42px;
+          gap: 9px;
+          padding: 6px 8px;
+          border-color: transparent;
+        }
+        .sb-material-copy { flex: 1; min-width: 0; }
+        .sb-material-name { display: block; font-size: 11px; line-height: 1.2; }
+        .sb-stage {
+          grid-column: 2;
+          grid-row: 1;
+          min-height: 0;
+          padding: 0;
+        }
+        .sb-canvas-frame {
+          width: 100%;
+          min-height: 0;
+          border: 0;
+          background: #050606;
+          background-image: none;
+        }
+        .sb-bottom-bar {
+          grid-column: 1 / -1;
+          grid-row: 2;
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+          gap: 8px;
+          padding: 6px 10px;
+          border-top: 1px solid var(--sb-line);
+          background: #090b0c;
+        }
+        .sb-action {
+          min-width: 84px;
+          height: 34px;
+          justify-content: center;
+          padding: 0 12px;
+          font-size: 10px;
+        }
+        .sb-action:focus-visible,
+        .sb-material:focus-visible {
+          outline: 2px solid #d8dad6;
+          outline-offset: 2px;
+        }
+        @media (max-width: 700px) {
+          .sb-workspace {
+            grid-template-columns: minmax(0, 1fr);
+            grid-template-rows: auto minmax(0, 1fr) 48px;
+          }
+          .sb-tool-rail {
+            grid-column: 1;
+            grid-row: 1;
+            padding: 6px;
+            border-right: 0;
+            border-bottom: 1px solid var(--sb-line);
+          }
+          .sb-material-list {
+            display: grid;
+            grid-template-columns: repeat(6, minmax(0, 1fr));
+            gap: 3px;
+          }
+          .sb-material {
+            min-width: 0;
+            min-height: 52px;
+            flex-direction: column;
+            justify-content: center;
+            gap: 4px;
+            padding: 4px 2px;
+          }
+          .sb-swatch { width: 15px; height: 15px; }
+          .sb-material-copy { flex: initial; }
+          .sb-material-name { font-size: 9px; }
+          .sb-stage {
+            grid-column: 1;
+            grid-row: 2;
+          }
+          .sb-bottom-bar {
+            grid-row: 3;
+            justify-content: center;
+          }
+        }
       `}</style>
 
-      <header className="sb-topbar">
-        <div className="sb-brand">
-          <div className="sb-mark" aria-hidden="true" />
-          <div>
-            <div className="sb-wordmark">SANDBOXED</div>
-            <div className="sb-edition">material study / 001</div>
-          </div>
-        </div>
-        <div className="sb-top-meta">
-          <span className="sb-live"><span /> {paused ? "holding" : "running"}</span>
-          <span>no saves · just play</span>
-        </div>
-      </header>
-      <div className="sb-rule" />
-
-      <section className="sb-heading" aria-label="Sandbox introduction">
-        <div>
-          <p className="sb-kicker">An open-ended little experiment</p>
-          <h1 className="sb-title">Make a small world.</h1>
-          <p className="sb-deck">Pick a material. Draw it in. See what happens.</p>
-        </div>
-        <div className="sb-temperature" aria-label={`Temperature ${counts.temperature}`}>
-          <span className={`sb-temp-bar is-${counts.temperature}`} aria-hidden="true">
-            <i /><i /><i /><i /><i />
-          </span>
-          <span className="sb-temp-word">field / {counts.temperature}</span>
-        </div>
-      </section>
-
       <section className="sb-workspace" aria-label="Material sandbox">
-        <aside className="sb-tool-rail" aria-label="Material and brush controls">
-          <div className="sb-section-label"><span>Materials</span><span>06</span></div>
+        <aside className="sb-tool-rail" aria-label="Materials">
           <div className="sb-material-list" role="group" aria-label="Choose a material">
             {MATERIALS.map((material) => (
               <button
@@ -646,55 +705,20 @@ export function SandboxedGame() {
                 key={material.id}
                 className="sb-material"
                 aria-pressed={selected === material.id}
-                aria-label={`${material.name}, ${material.descriptor}. Shortcut ${material.key}`}
+                aria-label={material.name}
+                title={material.name}
                 onClick={() => setSelected(material.id)}
               >
                 <span className="sb-swatch" style={{ backgroundColor: material.tone }} />
                 <span className="sb-material-copy">
                   <span className="sb-material-name">{material.name}</span>
-                  <span className="sb-material-type">{material.descriptor}</span>
                 </span>
-                <span className="sb-key" aria-hidden="true">{material.key}</span>
               </button>
             ))}
-          </div>
-          <div className="sb-tools-bottom">
-            <label className="sb-brush-label" htmlFor="sb-brush">
-              <span>Brush radius</span>
-              <output htmlFor="sb-brush">{brush}px</output>
-            </label>
-            <input
-              id="sb-brush"
-              className="sb-range"
-              type="range"
-              min="1"
-              max="12"
-              value={brush}
-              aria-label="Brush size"
-              onChange={(event) => setBrush(Number(event.currentTarget.value))}
-            />
-            <div className="sb-brush-scale"><span>fine</span><span>wide</span></div>
           </div>
         </aside>
 
         <div className="sb-stage">
-          <div className="sb-stage-head">
-            <div className="sb-stage-label"><span className="sb-index">01</span> Simulation surface</div>
-            <div className="sb-stage-tools">
-              <button
-                type="button"
-                className="sb-action sb-action-primary"
-                onClick={togglePaused}
-                aria-label={paused ? "Resume simulation" : "Pause simulation"}
-              >
-                <Icon kind={paused ? "play" : "pause"} />
-                {paused ? "Resume" : "Pause"}
-              </button>
-              <button type="button" className="sb-action" onClick={clearWorld} aria-label="Clear the simulation">
-                <Icon kind="clear" /> Clear
-              </button>
-            </div>
-          </div>
           <div className="sb-canvas-frame">
             <canvas
               ref={canvasRef}
@@ -709,20 +733,24 @@ export function SandboxedGame() {
               onLostPointerCapture={stopDrawing}
               onContextMenu={(event) => event.preventDefault()}
             />
-            <span className="sb-corner sb-corner-tl">field 180 × 104</span>
-            <span className="sb-corner sb-corner-br">pointer to deposit</span>
-          </div>
-          <div className="sb-stage-foot">
-            <div className="sb-stat-row" aria-live="polite">
-              <span className="sb-stat"><Icon kind="dot" /> grains <strong>{counts.particles.toLocaleString()}</strong></span>
-              <span className="sb-stat">selected <strong>{MATERIALS.find((item) => item.id === selected)?.name}</strong></span>
-            </div>
-            <span className="sb-hint">1–6 materials&nbsp; · &nbsp;space pause&nbsp; · &nbsp;C clear&nbsp; · &nbsp;[ ] brush</span>
           </div>
         </div>
+        <div className="sb-bottom-bar" aria-label="Simulation controls">
+          <button
+            type="button"
+            className="sb-action sb-action-primary"
+            onClick={togglePaused}
+            aria-label={paused ? "Resume simulation" : "Pause simulation"}
+          >
+            <Icon kind={paused ? "play" : "pause"} />
+            {paused ? "Resume" : "Pause"}
+          </button>
+          <button type="button" className="sb-action" onClick={clearWorld} aria-label="Clear the simulation">
+            <Icon kind="clear" />
+            Clear
+          </button>
+        </div>
       </section>
-      <div className={`sb-status${notice ? " is-visible" : ""}`} role="status">{notice}</div>
-      <span className="sb-sr-only">A small starter scene is already moving. Choose a material and draw on the surface.</span>
     </main>
   );
 }
