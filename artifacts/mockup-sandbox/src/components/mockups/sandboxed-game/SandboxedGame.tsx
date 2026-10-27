@@ -6,6 +6,7 @@ type Material = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 type World = {
   cells: Uint8Array;
   heat: Float32Array;
+  nextHeat: Float32Array;
   burn: Uint8Array;
   moved: Uint8Array;
 };
@@ -13,6 +14,10 @@ type World = {
 const COLS = 180;
 const ROWS = 104;
 const TOTAL = COLS * ROWS;
+const AMBIENT_TEMPERATURE_K = 293;
+const FIRE_TEMPERATURE_K = 1200;
+const MAX_TEMPERATURE_K = 9999;
+const HEAT_CONDUCTIVITY = 0.12;
 
 const MATERIALS: {
   name: MaterialName;
@@ -49,7 +54,7 @@ function swap(world: World, from: number, to: number): void {
   world.heat[to] = world.heat[from];
   world.burn[to] = world.burn[from];
   world.cells[from] = 0;
-  world.heat[from] = 0;
+  world.heat[from] = AMBIENT_TEMPERATURE_K;
   world.burn[from] = 0;
   world.moved[to] = 1;
 }
@@ -65,7 +70,7 @@ function fillCircle(world: World, cx: number, cy: number, radius: number, materi
       if (insideBrush && depositPixel) {
         const i = indexAt(x, y);
         world.cells[i] = material;
-        world.heat[i] = material === 6 ? 1 : 0;
+        world.heat[i] = material === 6 ? FIRE_TEMPERATURE_K : AMBIENT_TEMPERATURE_K;
         world.burn[i] = material === 6 ? 90 : 0;
       }
     }
@@ -103,8 +108,82 @@ function seedWorld(world: World): void {
   fillCircle(world, 127, 85, 2, 6);
 }
 
+function diffuseHeat(world: World): void {
+  const currentHeat = world.heat;
+  const nextHeat = world.nextHeat;
+
+  for (let y = 0; y < ROWS; y += 1) {
+    for (let x = 0; x < COLS; x += 1) {
+      const i = indexAt(x, y);
+      const center = world.cells[i] === 6 ? FIRE_TEMPERATURE_K : currentHeat[i];
+      let neighborTotal = 0;
+      let neighborCount = 0;
+
+      for (let dy = -1; dy <= 1; dy += 1) {
+        const ny = y + dy;
+        if (ny < 0 || ny >= ROWS) continue;
+        for (let dx = -1; dx <= 1; dx += 1) {
+          if (dx === 0 && dy === 0) continue;
+          const nx = x + dx;
+          if (nx < 0 || nx >= COLS) continue;
+          const neighbor = indexAt(nx, ny);
+          neighborTotal += world.cells[neighbor] === 6
+            ? FIRE_TEMPERATURE_K
+            : currentHeat[neighbor];
+          neighborCount += 1;
+        }
+      }
+
+      const neighborAverage = neighborTotal / neighborCount;
+      const blended = center + (neighborAverage - center) * HEAT_CONDUCTIVITY;
+      nextHeat[i] = world.cells[i] === 6
+        ? FIRE_TEMPERATURE_K
+        : Math.max(0, Math.min(MAX_TEMPERATURE_K, blended));
+    }
+  }
+
+  world.heat = nextHeat;
+  world.nextHeat = currentHeat;
+}
+
+function touchesFire(world: World, x: number, y: number): boolean {
+  return (
+    (x > 0 && world.cells[indexAt(x - 1, y)] === 6) ||
+    (x < COLS - 1 && world.cells[indexAt(x + 1, y)] === 6) ||
+    (y > 0 && world.cells[indexAt(x, y - 1)] === 6) ||
+    (y < ROWS - 1 && world.cells[indexAt(x, y + 1)] === 6)
+  );
+}
+
+function applyPhaseChanges(world: World): void {
+  const woodToIgnite: number[] = [];
+
+  for (let y = 0; y < ROWS; y += 1) {
+    for (let x = 0; x < COLS; x += 1) {
+      const i = indexAt(x, y);
+      const kind = world.cells[i];
+      if (kind === 3 && world.heat[i] > 373) {
+        world.cells[i] = 4;
+      } else if (kind === 4 && world.heat[i] < 371) {
+        world.cells[i] = 3;
+      } else if (kind === 5 && (world.heat[i] > 873 || touchesFire(world, x, y))) {
+        woodToIgnite.push(i);
+      }
+    }
+  }
+
+  for (const i of woodToIgnite) {
+    world.cells[i] = 6;
+    world.heat[i] = FIRE_TEMPERATURE_K;
+    world.burn[i] = 115 + Math.floor(Math.random() * 80);
+  }
+}
+
 function tick(world: World, frame: number): void {
+  diffuseHeat(world);
   world.moved.fill(0);
+  applyPhaseChanges(world);
+
   const leftToRight = frame % 2 === 0;
   // Bottom-up gives falling matter a natural one-cell step; the moved mask keeps each
   // particle from being processed twice when gases travel in the opposite direction.
@@ -115,57 +194,16 @@ function tick(world: World, frame: number): void {
     for (let x = start; x !== end; x += stride) {
       const i = indexAt(x, y);
       const kind = world.cells[i];
-      if (kind === 0) {
-        world.heat[i] = Math.max(0, world.heat[i] - 0.007);
-        continue;
-      }
-      if (world.moved[i]) continue;
+      if (kind === 0 || world.moved[i]) continue;
 
       if (kind === 6) {
-        world.heat[i] = 1;
         if (world.burn[i] > 0) world.burn[i] -= 1;
         if (Math.random() < 0.035) world.burn[i] = Math.max(0, world.burn[i] - 2);
-        const nearby = [
-          [x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1],
-          [x + 1, y - 1], [x - 1, y - 1],
-        ];
-        for (const [nx, ny] of nearby) {
-          if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) continue;
-          const ni = indexAt(nx, ny);
-          world.heat[ni] = Math.min(1, world.heat[ni] + 0.09);
-          if (world.cells[ni] === 5 && Math.random() < 0.08) {
-            world.cells[ni] = 6;
-            world.burn[ni] = 110 + Math.floor(Math.random() * 80);
-            world.heat[ni] = 1;
-          }
-        }
         if (y > 0 && world.cells[indexAt(x, y - 1)] === 0 && Math.random() < 0.25) {
           swap(world, i, indexAt(x, y - 1));
         } else if (world.burn[i] === 0 && Math.random() < 0.1) {
           world.cells[i] = 7;
-          world.heat[i] = 0.4;
         }
-        continue;
-      }
-
-      world.heat[i] = Math.max(0, world.heat[i] - (kind === 4 ? 0.018 : 0.007));
-
-      if (kind === 5 && world.heat[i] > 0.7 && Math.random() < 0.006) {
-        world.cells[i] = 6;
-        world.burn[i] = 115 + Math.floor(Math.random() * 80);
-        continue;
-      }
-
-      if (kind === 3 && world.heat[i] > 0.73) {
-        world.cells[i] = 4;
-        world.heat[i] = 0.6;
-        world.moved[i] = 1;
-        continue;
-      }
-
-      if (kind === 4 && world.heat[i] < 0.08 && Math.random() < 0.035) {
-        world.cells[i] = 3;
-        world.moved[i] = 1;
         continue;
       }
 
@@ -199,7 +237,8 @@ function tick(world: World, frame: number): void {
         }
       } else if (kind === 7 && Math.random() < 0.005) {
         world.cells[i] = 0;
-        world.heat[i] = 0;
+        world.heat[i] = AMBIENT_TEMPERATURE_K;
+        world.burn[i] = 0;
       }
     }
   }
@@ -236,7 +275,8 @@ export function SandboxedGame() {
     const world = worldRef.current;
     if (!world) return;
     world.cells.fill(0);
-    world.heat.fill(0);
+    world.heat.fill(AMBIENT_TEMPERATURE_K);
+    world.nextHeat.fill(AMBIENT_TEMPERATURE_K);
     world.burn.fill(0);
   }, []);
 
@@ -253,7 +293,8 @@ export function SandboxedGame() {
     canvas.height = ROWS;
     const world: World = {
       cells: new Uint8Array(TOTAL),
-      heat: new Float32Array(TOTAL),
+      heat: new Float32Array(TOTAL).fill(AMBIENT_TEMPERATURE_K),
+      nextHeat: new Float32Array(TOTAL).fill(AMBIENT_TEMPERATURE_K),
       burn: new Uint8Array(TOTAL),
       moved: new Uint8Array(TOTAL),
     };
