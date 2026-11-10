@@ -1,0 +1,1 @@
+- [Sandboxed heat model](sandboxed-heat-model.md) — empty cells have no temperature and do not participate in heat transfer.

@@ -18,6 +18,7 @@ const TOTAL = COLS * ROWS;
 const AMBIENT_TEMPERATURE_K = 293;
 const FIRE_TEMPERATURE_K = 1200;
 const MAX_TEMPERATURE_K = 9999;
+const NO_TEMPERATURE = Number.NaN;
 const HEAT_CONDUCTIVITY = 0.12;
 
 const MATERIALS: {
@@ -66,8 +67,8 @@ function swap(world: World, from: number, to: number): void {
   world.nextHeat[to] = carriedHeat;
   world.burn[to] = world.burn[from];
   world.cells[from] = 0;
-  world.heat[from] = 0;
-  world.nextHeat[from] = 0;
+  world.heat[from] = NO_TEMPERATURE;
+  world.nextHeat[from] = NO_TEMPERATURE;
   world.burn[from] = 0;
   world.moved[to] = 1;
 }
@@ -83,8 +84,8 @@ function fillCircle(world: World, cx: number, cy: number, radius: number, materi
       if (material === 0) {
         if (world.cells[i] === 0) continue;
         world.cells[i] = 0;
-        world.heat[i] = 0;
-        world.nextHeat[i] = 0;
+        world.heat[i] = NO_TEMPERATURE;
+        world.nextHeat[i] = NO_TEMPERATURE;
         world.burn[i] = 0;
       } else if (world.cells[i] === 0) {
         world.cells[i] = material;
@@ -143,7 +144,7 @@ function diffuseHeat(world: World): void {
       const i = indexAt(x, y);
       const kind = world.cells[i];
       if (kind === 0) {
-        nextHeat[i] = 0;
+        nextHeat[i] = NO_TEMPERATURE;
         continue;
       }
 
@@ -270,8 +271,8 @@ function tick(world: World, frame: number): void {
         }
       } else if (kind === 7 && Math.random() < 0.005) {
         world.cells[i] = 0;
-        world.heat[i] = 0;
-        world.nextHeat[i] = 0;
+        world.heat[i] = NO_TEMPERATURE;
+        world.nextHeat[i] = NO_TEMPERATURE;
         world.burn[i] = 0;
       }
     }
@@ -310,8 +311,8 @@ export function SandboxedGame() {
     const world = worldRef.current;
     if (!world) return;
     world.cells.fill(0);
-    world.heat.fill(0);
-    world.nextHeat.fill(0);
+    world.heat.fill(NO_TEMPERATURE);
+    world.nextHeat.fill(NO_TEMPERATURE);
     world.burn.fill(0);
   }, []);
 
@@ -328,8 +329,8 @@ export function SandboxedGame() {
     canvas.height = ROWS;
     const world: World = {
       cells: new Uint8Array(TOTAL),
-      heat: new Float32Array(TOTAL),
-      nextHeat: new Float32Array(TOTAL),
+      heat: new Float32Array(TOTAL).fill(NO_TEMPERATURE),
+      nextHeat: new Float32Array(TOTAL).fill(NO_TEMPERATURE),
       burn: new Uint8Array(TOTAL),
       moved: new Uint8Array(TOTAL),
     };
