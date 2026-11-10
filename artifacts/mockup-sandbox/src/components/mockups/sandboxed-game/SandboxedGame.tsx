@@ -47,8 +47,25 @@ const COLORS: Record<number, [number, number, number]> = {
   7: [104, 103, 98],
 };
 
+const DENSITY: Record<Material, number> = {
+  0: 0,
+  1: 65535,
+  2: 200,
+  3: 100,
+  4: 1,
+  5: 65535,
+  6: 2,
+  7: 25,
+};
+
 function indexAt(x: number, y: number): number {
   return y * COLS + x;
+}
+
+function canDisplace(world: World, moving: Material, targetIndex: number): boolean {
+  const target = world.cells[targetIndex] as Material;
+  if (target === 0) return true;
+  return !world.moved[targetIndex] && DENSITY[moving] > DENSITY[target];
 }
 
 function cellAtPointer(canvas: HTMLCanvasElement, clientX: number, clientY: number): { x: number; y: number } | null {
@@ -61,16 +78,23 @@ function cellAtPointer(canvas: HTMLCanvasElement, clientX: number, clientY: numb
 }
 
 function swap(world: World, from: number, to: number): void {
-  const carriedHeat = world.heat[from];
-  world.cells[to] = world.cells[from];
-  world.heat[to] = carriedHeat;
-  world.nextHeat[to] = carriedHeat;
-  world.burn[to] = world.burn[from];
-  world.cells[from] = 0;
-  world.heat[from] = NO_TEMPERATURE;
-  world.nextHeat[from] = NO_TEMPERATURE;
-  world.burn[from] = 0;
+  const movingCell = world.cells[from] as Material;
+  const displacedCell = world.cells[to] as Material;
+  const movingHeat = world.heat[from];
+  const displacedHeat = world.heat[to];
+  const movingBurn = world.burn[from];
+  const displacedBurn = world.burn[to];
+
+  world.cells[to] = movingCell;
+  world.heat[to] = movingHeat;
+  world.nextHeat[to] = movingHeat;
+  world.burn[to] = movingBurn;
+  world.cells[from] = displacedCell;
+  world.heat[from] = displacedHeat;
+  world.nextHeat[from] = displacedHeat;
+  world.burn[from] = displacedBurn;
   world.moved[to] = 1;
+  if (displacedCell !== 0) world.moved[from] = 1;
 }
 
 function fillCircle(world: World, cx: number, cy: number, radius: number, material: Material): void {
@@ -233,8 +257,9 @@ function tick(world: World, frame: number): void {
       if (kind === 6) {
         if (world.burn[i] > 0) world.burn[i] -= 1;
         if (Math.random() < 0.035) world.burn[i] = Math.max(0, world.burn[i] - 2);
-        if (y > 0 && world.cells[indexAt(x, y - 1)] === 0 && Math.random() < 0.25) {
-          swap(world, i, indexAt(x, y - 1));
+        const above = y > 0 ? indexAt(x, y - 1) : -1;
+        if (above >= 0 && canDisplace(world, kind, above) && Math.random() < 0.25) {
+          swap(world, i, above);
         } else if (world.burn[i] === 0 && Math.random() < 0.1) {
           world.cells[i] = 7;
         }
@@ -248,25 +273,25 @@ function tick(world: World, frame: number): void {
       const secondSide = x - side >= 0 && x - side < COLS ? indexAt(x - side, y) : -1;
 
       if (kind === 2) {
-        if (down >= 0 && world.cells[down] === 0) swap(world, i, down);
+        if (down >= 0 && canDisplace(world, kind, down)) swap(world, i, down);
         else {
           const diagonalA = x + side >= 0 && x + side < COLS && y + 1 < ROWS
             ? indexAt(x + side, y + 1) : -1;
           const diagonalB = x - side >= 0 && x - side < COLS && y + 1 < ROWS
             ? indexAt(x - side, y + 1) : -1;
-          if (diagonalA >= 0 && world.cells[diagonalA] === 0) swap(world, i, diagonalA);
-          else if (diagonalB >= 0 && world.cells[diagonalB] === 0) swap(world, i, diagonalB);
+          if (diagonalA >= 0 && canDisplace(world, kind, diagonalA)) swap(world, i, diagonalA);
+          else if (diagonalB >= 0 && canDisplace(world, kind, diagonalB)) swap(world, i, diagonalB);
         }
       } else if (kind === 3) {
-        if (down >= 0 && world.cells[down] === 0) swap(world, i, down);
-        else if (firstSide >= 0 && world.cells[firstSide] === 0) swap(world, i, firstSide);
-        else if (secondSide >= 0 && world.cells[secondSide] === 0 && Math.random() < 0.7) {
+        if (down >= 0 && canDisplace(world, kind, down)) swap(world, i, down);
+        else if (firstSide >= 0 && canDisplace(world, kind, firstSide)) swap(world, i, firstSide);
+        else if (secondSide >= 0 && canDisplace(world, kind, secondSide) && Math.random() < 0.7) {
           swap(world, i, secondSide);
         }
       } else if (kind === 4) {
-        if (up >= 0 && world.cells[up] === 0) swap(world, i, up);
-        else if (firstSide >= 0 && world.cells[firstSide] === 0) swap(world, i, firstSide);
-        else if (secondSide >= 0 && world.cells[secondSide] === 0 && Math.random() < 0.6) {
+        if (up >= 0 && canDisplace(world, kind, up)) swap(world, i, up);
+        else if (firstSide >= 0 && canDisplace(world, kind, firstSide)) swap(world, i, firstSide);
+        else if (secondSide >= 0 && canDisplace(world, kind, secondSide) && Math.random() < 0.6) {
           swap(world, i, secondSide);
         }
       } else if (kind === 7 && Math.random() < 0.005) {
