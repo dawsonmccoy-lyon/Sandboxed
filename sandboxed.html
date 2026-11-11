@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sandboxed</title>
+<style>
+:root{--bg:#050606;--panel:#090b0c;--line:#242728;--ink:#f0f0ed;--muted:#8b9091;--hover:#111415;--sel:#171a1b;--selb:#373b3b;color-scheme:dark;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#050606}}
+*,*::before,*::after{box-sizing:inherit}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font-family:ui-sans-serif,system-ui,-apple-system,sans-serif}
+.app{height:100%;display:grid;grid-template-columns:148px minmax(0,1fr);grid-template-rows:minmax(0,1fr) 52px}
+.rail{padding:8px;border-right:1px solid var(--line);overflow-y:auto;display:grid;gap:3px;align-content:start}
+.mat{appearance:none;border:1px solid transparent;background:transparent;color:#a8acad;cursor:pointer;min-height:42px;display:flex;align-items:center;gap:9px;padding:6px 8px;font:inherit;font-size:12px;text-align:left}
+.mat:hover{background:var(--hover);color:#e4e5e1}
+.mat[aria-pressed="true"]{background:var(--sel);border-color:var(--selb);color:var(--ink)}
+.sw{width:17px;height:17px;border:1px solid #ffffff20;flex:none}
+.key{margin-left:auto;color:#626768;border:1px solid #343839;padding:1px 5px;font-size:10px}
+.stage{min-height:0;position:relative;display:grid;place-items:center;container-type:size;overflow:hidden}
+canvas{display:block;width:min(100cqw,calc(100cqh*180/104));aspect-ratio:180/104;height:auto;image-rendering:pixelated;touch-action:none;cursor:crosshair;outline:none;box-shadow:0 0 0 1px var(--line)}
+.bar{grid-column:1/-1;display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:6px 10px;border-top:1px solid var(--line);background:var(--panel)}
+.tip{position:absolute;top:8px;left:10px;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:#c4c7c4;pointer-events:none;text-shadow:0 0 3px #000}
+.hint{margin-right:auto;color:#64696a;font-size:11px}
+button.act{min-width:84px;height:34px;border:1px solid #333839;background:#0d1011;color:#bfc3c2;cursor:pointer;font:inherit;font-size:12px}
+button.act:hover{color:#f4f4f0;border-color:#707575;background:#16191a}
+button.act.pri{color:#101212;background:#d8dad6;border-color:#d8dad6}
+button.act.pri:hover{background:#f0f0ed}
+button:focus-visible{outline:2px solid #d8dad6;outline-offset:2px}
+@media (max-width:700px){
+.app{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) 48px}
+.rail{border-right:0;border-bottom:1px solid var(--line);grid-template-columns:repeat(6,1fr);padding:6px}
+.mat{flex-direction:column;justify-content:center;gap:4px;min-height:52px;padding:4px 2px;font-size:10px}
+.key,.hint{display:none}.bar{justify-content:center}}
+</style>
+</head>
+<body>
+<main class="app">
+<aside class="rail" id="rail" aria-label="Materials"></aside>
+<div class="stage"><canvas id="c" tabindex="0" role="img" aria-label="Falling sand simulation. Draw with the selected material; right-click and drag to erase."></canvas><div class="tip" id="tip"></div></div>
+<div class="bar">
+<span class="hint">Keys 1–6 choose a material · Space pauses · C clears · right-click erases · wheel or [ ] resizes the brush</span><span class="hint" id="size" style="margin-right:0"></span>
+<button class="act pri" id="pause" type="button">Pause</button>
+<button class="act" id="clear" type="button">Clear</button>
+</div>
+</main>
+<script>
+const COLS=180,ROWS=104,TOTAL=COLS*ROWS,AMB=295.15,FIRE=695.15,MAXT=9999,NOT=NaN,COND=0.12;
+const MATS=[["Stone",1,"#9F9F9F"],["Sand",2,"#FECF8F"],["Water",3,"#2030D0"],["Steam",4,"#A0A0FF"],["Wood",5,"#BF9F3F"],["Fire",6,"#CDAA61"]];
+const COLORS={0:[5,6,7],1:[159,159,159],2:[254,207,143],3:[32,48,208],4:[160,160,255],5:[191,159,63],6:[205,170,97]};
+const DENSITY={0:0,1:65535,2:200,3:100,4:1,5:65535,6:2};
+const W={cells:new Uint8Array(TOTAL),heat:new Float32Array(TOTAL).fill(NOT),nextHeat:new Float32Array(TOTAL).fill(NOT),life:new Uint8Array(TOTAL),moved:new Uint8Array(TOTAL)};
+let selected=2,paused=false,drawing=false,activeMat=2,last=null,cursor=null,frame=0,brush=9,wheelAcc=0;
+const BRUSH_MIN=1,BRUSH_MAX=39;
+const idx=(x,y)=>y*COLS+x;
+const fireLife=()=>120+Math.floor(Math.random()*50);
+const startTemp=m=>m===6?FIRE:m===4?395.15:AMB;
+function canDisplace(m,t){const k=W.cells[t];if(k===0)return true;return !W.moved[t]&&DENSITY[m]>DENSITY[k]}
+function swap(a,b){const mc=W.cells[a],dc=W.cells[b],mh=W.heat[a],dh=W.heat[b],ml=W.life[a],dl=W.life[b];
+W.cells[b]=mc;W.heat[b]=mh;W.nextHeat[b]=mh;W.life[b]=ml;W.cells[a]=dc;W.heat[a]=dh;W.nextHeat[a]=dh;W.life[a]=dl;W.moved[b]=1;if(dc!==0)W.moved[a]=1}
+function fillCircle(cx,cy,d,m){const r=Math.floor(d/2),lim=d*d/4;for(let y=Math.max(0,cy-r);y<=Math.min(ROWS-1,cy+r);y++)for(let x=Math.max(0,cx-r);x<=Math.min(COLS-1,cx+r);x++){const dx=x-cx,dy=y-cy;if(dx*dx+dy*dy>lim)continue;const i=idx(x,y);
+if(m===0){if(W.cells[i]===0)continue;W.cells[i]=0;W.heat[i]=NOT;W.nextHeat[i]=NOT;W.life[i]=0}
+else if(W.cells[i]===0){W.cells[i]=m;W.heat[i]=startTemp(m);W.nextHeat[i]=W.heat[i];W.life[i]=m===6?fireLife():0}}}
+function seed(){
+for(let x=12;x<169;x++){W.cells[idx(x,96)]=1;W.cells[idx(x,97)]=1}
+for(let x=31;x<52;x++){const h=Math.max(1,Math.floor(7-Math.abs(x-41)*0.6));for(let y=96-h;y<96;y++)if(Math.random()>0.08)W.cells[idx(x,y)]=2}
+for(let x=72;x<88;x++){W.cells[idx(x,95)]=3;W.cells[idx(x,94)]=3}
+for(let y=87;y<95;y++){W.cells[idx(122,y)]=5;W.cells[idx(133,y)]=5}
+for(let x=122;x<=133;x++){W.cells[idx(x,87)]=5;W.cells[idx(x,91)]=5}
+for(let x=124;x<=131;x++){W.cells[idx(x,90)]=2;W.cells[idx(x,89)]=2}
+fillCircle(127,85,4,6);
+for(let i=0;i<TOTAL;i++){const k=W.cells[i];if(k===0)continue;const t=startTemp(k);W.heat[i]=t;W.nextHeat[i]=t}}
+function diffuse(){const cur=W.heat,nxt=W.nextHeat;
+for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++){const i=idx(x,y),k=W.cells[i];if(k===0){nxt[i]=NOT;continue}
+const c=k===6?FIRE:cur[i];let tot=0,n=0;
+for(let dy=-1;dy<=1;dy++){const ny=y+dy;if(ny<0||ny>=ROWS)continue;for(let dx=-1;dx<=1;dx++){if(!dx&&!dy)continue;const nx=x+dx;if(nx<0||nx>=COLS)continue;const j=idx(nx,ny);if(W.cells[j]===0)continue;tot+=W.cells[j]===6?FIRE:cur[j];n++}}
+const avg=n>0?tot/n:c,b=c+(avg-c)*COND;nxt[i]=k===6?FIRE:Math.max(0,Math.min(MAXT,b))}
+W.heat=nxt;W.nextHeat=cur}
+function touchesWater(x,y){for(let dy=-1;dy<=1;dy++){const ny=y+dy;if(ny<0||ny>=ROWS)continue;for(let dx=-1;dx<=1;dx++){if(!dx&&!dy)continue;const nx=x+dx;if(nx<0||nx>=COLS)continue;if(W.cells[idx(nx,ny)]===3)return true}}return false}
+function touchesFire(x,y){return(x>0&&W.cells[idx(x-1,y)]===6)||(x<COLS-1&&W.cells[idx(x+1,y)]===6)||(y>0&&W.cells[idx(x,y-1)]===6)||(y<ROWS-1&&W.cells[idx(x,y+1)]===6)}
+function phases(){const ign=[];for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++){const i=idx(x,y),k=W.cells[i];
+if(k===3&&W.heat[i]>373)W.cells[i]=4;else if(k===4&&W.heat[i]<371)W.cells[i]=3;else if(k===5&&(W.heat[i]>873||touchesFire(x,y)))ign.push(i)}
+for(const i of ign){W.cells[i]=6;W.heat[i]=FIRE;W.life[i]=fireLife()}}
+function tick(f){diffuse();W.moved.fill(0);phases();const ltr=f%2===0;
+for(let y=ROWS-1;y>=0;y--){const s=ltr?0:COLS-1,e=ltr?COLS:-1,st=ltr?1:-1;
+for(let x=s;x!==e;x+=st){const i=idx(x,y),k=W.cells[i];if(k===0||W.moved[i])continue;
+if(k===6){if(W.life[i]>0)W.life[i]--;
+if(W.life[i]===0||touchesWater(x,y)){W.cells[i]=0;W.heat[i]=NOT;W.nextHeat[i]=NOT;continue}
+const up=y>0?idx(x,y-1):-1;if(up>=0&&canDisplace(k,up)&&Math.random()<0.25)swap(i,up);continue}
+const down=y+1<ROWS?idx(x,y+1):-1,up=y-1>=0?idx(x,y-1):-1,side=Math.random()<0.5?-1:1;
+const s1=x+side>=0&&x+side<COLS?idx(x+side,y):-1,s2=x-side>=0&&x-side<COLS?idx(x-side,y):-1;
+if(k===2){if(down>=0&&canDisplace(k,down))swap(i,down);else{
+const dA=x+side>=0&&x+side<COLS&&y+1<ROWS?idx(x+side,y+1):-1,dB=x-side>=0&&x-side<COLS&&y+1<ROWS?idx(x-side,y+1):-1;
+if(dA>=0&&canDisplace(k,dA))swap(i,dA);else if(dB>=0&&canDisplace(k,dB))swap(i,dB)}}
+else if(k===3){if(down>=0&&canDisplace(k,down))swap(i,down);else if(s1>=0&&canDisplace(k,s1))swap(i,s1);else if(s2>=0&&canDisplace(k,s2)&&Math.random()<0.7)swap(i,s2)}
+else if(k===4){if(up>=0&&canDisplace(k,up))swap(i,up);else if(s1>=0&&canDisplace(k,s1))swap(i,s1);else if(s2>=0&&canDisplace(k,s2)&&Math.random()<0.6)swap(i,s2)}
+}}}
+const cv=document.getElementById("c"),ctx=cv.getContext("2d",{alpha:false});cv.width=COLS;cv.height=ROWS;
+const img=ctx.createImageData(COLS,ROWS);
+const tipEl=document.getElementById("tip"),MN=Object.fromEntries(MATS.map(([n,id])=>[id,n]));let tipText="";
+function render(){if(!paused&&frame%2===0)tick(frame);frame++;const p=img.data;
+for(let i=0;i<TOTAL;i++){const k=W.cells[i],o=i*4;if(k===6){const t=Math.min(W.life[i],169)/169;p[o]=205*t;p[o+1]=170*t;p[o+2]=97*t}else{const c=COLORS[k];p[o]=c[0];p[o+1]=c[1];p[o+2]=c[2]}p[o+3]=255}
+ctx.putImageData(img,0,0);
+if(cursor){ctx.fillStyle="rgba(255,255,255,.3)";
+for(let y=Math.max(0,cursor.y-(brush>>1));y<=Math.min(ROWS-1,cursor.y+(brush>>1));y++)for(let x=Math.max(0,cursor.x-(brush>>1));x<=Math.min(COLS-1,cursor.x+(brush>>1));x++){const dx=x-cursor.x,dy=y-cursor.y;if(dx*dx+dy*dy>brush*brush/4)continue;ctx.fillRect(x,y,1,1)}}
+let t="";if(cursor){const i=idx(cursor.x,cursor.y),k=W.cells[i];if(k!==0)t=MN[k]+", Temp: "+(W.heat[i]-273.15).toFixed(1)+"C"}
+if(t!==tipText){tipText=t;tipEl.textContent=t}
+requestAnimationFrame(render)}
+function cell(e){const r=cv.getBoundingClientRect();return{x:Math.max(0,Math.min(COLS-1,Math.floor((e.clientX-r.left)/r.width*COLS))),y:Math.max(0,Math.min(ROWS-1,Math.floor((e.clientY-r.top)/r.height*ROWS)))}}
+function paint(e){const p=cell(e);cursor={x:p.x,y:p.y,erase:activeMat===0};
+const n=last?Math.max(Math.abs(p.x-last.x),Math.abs(p.y-last.y),1):1;
+for(let s=0;s<=n;s++){const dx=last?Math.round(last.x+(p.x-last.x)*s/n):p.x,dy=last?Math.round(last.y+(p.y-last.y)*s/n):p.y;fillCircle(dx,dy,brush,activeMat)}last=p}
+cv.addEventListener("pointerdown",e=>{if(e.button!==0&&e.button!==2&&e.pointerType!=="touch")return;activeMat=e.button===2?0:selected;drawing=true;last=null;cv.setPointerCapture(e.pointerId);paint(e)});
+cv.addEventListener("pointermove",e=>{if(drawing)paint(e);else if(e.pointerType!=="touch"){const p=cell(e);cursor={x:p.x,y:p.y,erase:false}}});
+const stop=e=>{drawing=false;last=null;activeMat=selected;if(e.pointerType==="touch")cursor=null};
+cv.addEventListener("pointerup",stop);cv.addEventListener("pointercancel",stop);
+cv.addEventListener("pointerleave",()=>{if(!drawing)cursor=null});
+cv.addEventListener("contextmenu",e=>e.preventDefault());
+const sizeEl=document.getElementById("size");
+function setBrush(n){brush=Math.max(BRUSH_MIN,Math.min(BRUSH_MAX,n));sizeEl.textContent="Brush "+brush}
+cv.addEventListener("wheel",e=>{e.preventDefault();wheelAcc+=e.deltaMode===1?e.deltaY*33:e.deltaY;if(wheelAcc>=40){setBrush(brush-2);wheelAcc=0}else if(wheelAcc<=-40){setBrush(brush+2);wheelAcc=0}},{passive:false});
+setBrush(brush);
+const rail=document.getElementById("rail");
+function select(id){selected=id;activeMat=id;[...rail.children].forEach(b=>b.setAttribute("aria-pressed",String(+b.dataset.id===id)))}
+MATS.forEach(([n,id,col],i)=>{const b=document.createElement("button");b.type="button";b.className="mat";b.dataset.id=id;b.innerHTML=`<span class="sw" style="background:${col}"></span><span>${n}</span><span class="key">${i+1}</span>`;b.onclick=()=>select(id);rail.appendChild(b)});
+select(2);
+const pb=document.getElementById("pause");
+function togglePause(){paused=!paused;pb.textContent=paused?"Resume":"Pause"}
+function clearAll(){W.cells.fill(0);W.heat.fill(NOT);W.nextHeat.fill(NOT);W.life.fill(0)}
+pb.onclick=togglePause;document.getElementById("clear").onclick=clearAll;
+addEventListener("keydown",e=>{if(e.key==="["){setBrush(brush-2);return}if(e.key==="]"){setBrush(brush+2);return}if(e.repeat)return;const m=MATS[+e.key-1];if(m){select(m[1]);return}
+if(e.code==="Space"){e.preventDefault();togglePause()}else if(e.key.toLowerCase()==="c")clearAll()});
+seed();requestAnimationFrame(render);
+</script>
+</body>
+</html>
