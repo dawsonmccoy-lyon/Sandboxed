@@ -1,2 +1,0 @@
-- [Sandboxed heat model](sandboxed-heat-model.md) — empty cells have no temperature and do not participate in heat transfer.
-- [Sandboxed material densities](sandboxed-material-densities.md) — density order controls displacement; stone and wood are effectively immovable.
